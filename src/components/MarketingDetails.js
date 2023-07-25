@@ -1,10 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useOpenAiApi } from "../hooks/useOpenAiApi";
 import PersonaComponent from "./PersonaComponent";
 import CommunicationMediaComponent from "./CommunicationMediaComponent";
 import JobToBeDoneComponent from "./JobToBeDoneComponent";
 import PostIdeasComponent from "./PostIdeasComponent";
 import LandingPageComponent from "./LandingPageComponent";
+import useUserCredits from "../hooks/useUserCredits";
+import { auth } from "../firebase";
 
 // Nous définissons les invites système pour chaque zone
 const systemPrompts = {
@@ -45,6 +47,15 @@ const MarketingDetails = ({ gptResponse, selectedCombination }) => {
     userPrompt: userPrompt,
     combination: combination,
   });
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      setUser(user);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   // Nous initialisons l'état pour chaque zone avec un booléen indiquant si elle est en chargement et le contenu initial
   const [state, setState] = useState({
@@ -55,42 +66,50 @@ const MarketingDetails = ({ gptResponse, selectedCombination }) => {
     landing_page: { isLoading: false, content: "" },
   });
 
+  const [credits, updateUserCredits] = useUserCredits(user?.uid);
+  const [price, setPrice] = useState(20);
+
   // Lorsque l'utilisateur clique sur le bouton de la zone, nous lançons la requête API avec l'invite système correspondante
   const handleButtonClick = (zone) => {
     const systemPrompt = systemPrompts[zone];
     setState((prev) => ({ ...prev, [zone]: { isLoading: true, content: "" } }));
 
-    // Convertir l'objet JSON en une chaîne de caractères
-    const dataString = JSON.stringify(data);
+    if (credits >= price) {
+      // Convertir l'objet JSON en une chaîne de caractères
+      const dataString = JSON.stringify(data);
 
-    openAiApi
-      .createChatCompletion({
-        model: "gpt-3.5-turbo",
-        messages: [
-          {
-            role: "system",
-            content: systemPrompt,
-          },
-          { role: "user", content: dataString },
-        ],
-        max_tokens: 600,
-      })
-      .then((response) => {
-        // Une fois la réponse reçue, nous mettons à jour l'état pour arrêter le chargement et stocker le contenu
-        const content = JSON.parse(response.data.choices[0].message.content);
-        setState((prev) => ({
-          ...prev,
-          [zone]: { isLoading: false, content: content },
-        }));
-      })
-      .catch((error) => {
-        // En cas d'erreur, nous arrêtons aussi le chargement et affichons l'erreur
-        console.error(error);
-        setState((prev) => ({
-          ...prev,
-          [zone]: { isLoading: false, content: "" },
-        }));
-      });
+      openAiApi
+        .createChatCompletion({
+          model: "gpt-3.5-turbo",
+          messages: [
+            {
+              role: "system",
+              content: systemPrompt,
+            },
+            { role: "user", content: dataString },
+          ],
+          max_tokens: 600,
+        })
+        .then((response) => {
+          // Une fois la réponse reçue, nous mettons à jour l'état pour arrêter le chargement et stocker le contenu
+          const content = JSON.parse(response.data.choices[0].message.content);
+          setState((prev) => ({
+            ...prev,
+            [zone]: { isLoading: false, content: content },
+          }));
+          updateUserCredits(credits - price);
+        })
+        .catch((error) => {
+          // En cas d'erreur, nous arrêtons aussi le chargement et affichons l'erreur
+          console.error(error);
+          setState((prev) => ({
+            ...prev,
+            [zone]: { isLoading: false, content: "" },
+          }));
+        });
+    } else {
+      alert("You don't have enough credits to perform this action.");
+    }
   };
 
   return (

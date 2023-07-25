@@ -1,8 +1,14 @@
 import React from "react";
 import { useOpenAiApi } from "../hooks/useOpenAiApi";
 import ResultDisplay from "./ResultDisplay";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import MarketingDetails from "./MarketingDetails";
+import { signOut } from "firebase/auth";
+import { auth } from "../firebase";
+import { db } from "../firebase";
+import { useNavigate } from "react-router-dom";
+import useUserCredits from "../hooks/useUserCredits";
+import { doc, onSnapshot } from "firebase/firestore";
 
 const MainComponent = () => {
   const openAiApi = useOpenAiApi();
@@ -18,46 +24,84 @@ const MainComponent = () => {
   const [placeholder, setPlaceholder] = useState(
     "Entrez la description de votre produit ou service ici..."
   );
+  // define user
+  const user = auth.currentUser;
+  // get user credits
+  const [credits, updateUserCredits] = useUserCredits(user.uid);
+  const [price, setPrice] = useState(20); // default price is 20 credits
 
   const sendPrompt = (systemPrompt, userPrompt) => {
-    setIsLoading(true);
-    if (openAiApi) {
-      openAiApi
-        .createChatCompletion({
-          model: "gpt-3.5-turbo",
-          messages: [
-            {
-              role: "system",
-              content: systemPrompt,
-            },
-            { role: "user", content: userPrompt },
-          ],
-          max_tokens: 500,
-        })
-        .then((response) => {
-          setIsLoading(false); // Indique la fin du chargement
-          response = JSON.parse(response.data.choices[0].message.content);
-          // add to the json the user prompt
-          response.user_prompt = userPrompt;
-          if (response.combinations) {
-            setGptResponse(response); // Met à jour l'état ici
-            setResponseReceived(true);
-          }
-        })
-        .catch((error) => {
-          setIsLoading(false); // En cas d'erreur, on arrête le chargement aussi
-          console.error(error);
-        });
+    if (credits >= price) {
+      setIsLoading(true);
+      if (openAiApi) {
+        openAiApi
+          .createChatCompletion({
+            model: "gpt-3.5-turbo",
+            messages: [
+              {
+                role: "system",
+                content: systemPrompt,
+              },
+              { role: "user", content: userPrompt },
+            ],
+            max_tokens: 500,
+          })
+          .then((response) => {
+            setIsLoading(false); // Indique la fin du chargement
+            response = JSON.parse(response.data.choices[0].message.content);
+            // add to the json the user prompt
+            response.user_prompt = userPrompt;
+            if (response.combinations) {
+              setGptResponse(response); // Met à jour l'état ici
+              setResponseReceived(true);
+              updateUserCredits(credits - price);
+            }
+          })
+          .catch((error) => {
+            setIsLoading(false); // En cas d'erreur, on arrête le chargement aussi
+            console.error(error);
+          });
+      }
+    } else {
+      alert("You don't have enough credits to perform this action.");
     }
   };
+
+  //  add on snapshot to update credits
+  useEffect(() => {
+    const docRef = doc(db, "users", user.uid);
+
+    const unsubscribe = onSnapshot(docRef, (doc) => {
+      if (doc.exists()) {
+        updateUserCredits(doc.data().credits);
+      }
+    });
+
+    // Nettoyage à la désinscription
+    return () => unsubscribe();
+  }, [user.uid]);
 
   const chooseCombination = (index) => {
     setCombinaisonSelected(index);
     setIsCombinationChosen(true);
   };
 
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    signOut(auth)
+      .then(() => {
+        // Sign-out successful.
+        navigate("/");
+        console.log("Signed out successfully");
+      })
+      .catch((error) => {
+        // An error happened.
+      });
+  };
+
   return (
-    <div className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col">
+    <div className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col bg-dark min-h-screen">
       <div className="relative">
         <div className="flex absolute inset-y-0 left-0 items-center pl-3 pointer-events-none">
           <svg
@@ -106,19 +150,19 @@ const MainComponent = () => {
             <div className="flex flex-row justify-center mt-4">
               <button
                 onClick={() => chooseCombination(0)}
-                className="text-white bg-dark focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2  mr-2 hover:bg-light hover:outline-dark hover:border-dark hover:text-dark hover:border-2"
+                className="text-dark bg-light focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2  mr-2 hover:bg-dark hover:outline-light hover:border-light hover:text-light hover:border-2"
               >
                 Choix 1
               </button>
               <button
                 onClick={() => chooseCombination(1)}
-                className="text-white bg-dark focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2  mr-2 hover:bg-light hover:outline-dark hover:border-dark hover:text-dark hover:border-2"
+                className="text-dark bg-light focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2  mr-2 hover:bg-dark hover:outline-light hover:border-light hover:text-light hover:border-2"
               >
                 Choix 2
               </button>
               <button
                 onClick={() => chooseCombination(2)}
-                className="text-white bg-dark focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2 hover:bg-light hover:outline-dark hover:border-dark hover:text-dark hover:border-2"
+                className="bg-light text-dark focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2 hover:bg-dark hover:outline-light hover:border-light hover:text-light hover:border-2"
               >
                 Choix 3
               </button>
@@ -126,6 +170,16 @@ const MainComponent = () => {
           )}
         </div>
       )}
+
+      {/* add logout button */}
+      <button
+        onClick={handleLogout}
+        className="text-white bg-light w-32 self-end focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2 mt-4 hover:bg-light hover:outline-dark hover:border-dark hover:text-dark hover:border-2"
+      >
+        Se déconnecter
+      </button>
+      {/* add user credits amount */}
+      <p className="text-white text-right mt-4">Crédits restants : {credits}</p>
     </div>
   );
 };
